@@ -1804,9 +1804,10 @@ static void OS_SchedNew(void)
 #if OS_SCHED_ROUND_ROBIN_EN > 0
     if (OSTCBCur == 0 | OSTCBCur->quantum == 0)
     {
-        if (OSTCBCur != 0)
+        if (OSTCBCur != 0) {
             OSRdyQueueOut();
             OSRdyQueueIn(OSTCBCur);
+        }
         // your code:
         OSPrioHighRdy = OSRdyTCBQueueFront->OSTCBPrio;
     }
