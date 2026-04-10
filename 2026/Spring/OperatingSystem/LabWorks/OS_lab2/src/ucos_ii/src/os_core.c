@@ -1009,7 +1009,9 @@ void OSTimeTick(void)
 
 #if OS_SCHED_ROUND_ROBIN_EN > 0
         // your code: decrese quantum time of current task (pointer of current tack's TCB: OSTCBCur):
-
+    if (OSTCBCur->quantum > 0) {
+        OSTCBCur->quantum--;
+    }
 #endif
 
         while (ptcb->OSTCBPrio != OS_TASK_IDLE_PRIO)
@@ -1036,6 +1038,7 @@ void OSTimeTick(void)
 #if OS_SCHED_ROUND_ROBIN_EN > 0 /* No, and if not in the ready queue, then queue in */
                         if ((OSRdyGrp & ptcb->OSTCBBitY) == 0 || (OSRdyTbl[ptcb->OSTCBY] & ptcb->OSTCBBitX) == 0)
                         // your code: put ptcb into queue of ready tasks
+                            OSRdyQueueIn(ptcb); 
 #endif
 
                             OSRdyGrp |= ptcb->OSTCBBitY;
