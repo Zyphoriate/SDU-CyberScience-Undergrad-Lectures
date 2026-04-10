@@ -512,7 +512,7 @@ INT8U  OSTaskDel (INT8U prio)
     OS_EXIT_CRITICAL();
 
 #if OS_SCHED_ROUND_ROBIN_EN > 0
-    OSRdyQueueOut();
+    OSRdyQueueOut(ptcb->OSTCBY);
     OSTCBCur = 0;
 #endif
 

@@ -86,64 +86,64 @@ static void OS_SchedNew(void);
 
 void OSRdyQueueIn(OS_TCB *ptcb)
 {
+    INT8U grp;
+
     if (ptcb->OSTCBPrio == OS_TASK_IDLE_PRIO)
         return;
 
-    ptcb->quantum          = OS_SCHED_QUANTUM_MAX;
-    ptcb->OSRdyTCBNext     = (OS_TCB *)0;
-    ptcb->OSRdyTCBPrev     = (OS_TCB *)0;
+    grp = ptcb->OSTCBY; // 优先级 >> 3，即第几组
 
-    if (OSRdyTCBQueueNum == 0) {
-        /* 队列为空，成为唯一节点 */
-        OSRdyTCBQueueFront = ptcb;
-        OSRdyTCBQueueRear  = ptcb;
-    } else {
-        /* 插入队尾 */
-        ptcb->OSRdyTCBPrev              = OSRdyTCBQueueRear;
-        OSRdyTCBQueueRear->OSRdyTCBNext = ptcb;
-        OSRdyTCBQueueRear               = ptcb;
+    ptcb->quantum = OS_SCHED_QUANTUM_MAX;
+    ptcb->OSRdyTCBNext = (OS_TCB *)0;
+    ptcb->OSRdyTCBPrev = (OS_TCB *)0;
+
+    if (OSRdyTCBQueueNumTbl[grp] == 0)
+    {
+        OSRdyTCBQueueFrontTbl[grp] = ptcb;
+        OSRdyTCBQueueRearTbl[grp] = ptcb;
     }
-
-    OSRdyTCBQueueNum++;
+    else
+    {
+        ptcb->OSRdyTCBPrev = OSRdyTCBQueueRearTbl[grp];
+        OSRdyTCBQueueRearTbl[grp]->OSRdyTCBNext = ptcb;
+        OSRdyTCBQueueRearTbl[grp] = ptcb;
+    }
+    OSRdyTCBQueueNumTbl[grp]++;
 }
 
-OS_TCB *OSRdyQueueOut(void)
+OS_TCB *OSRdyQueueOut(INT8U grp)
 {
     OS_TCB *ptcb;
 
-    if (OSRdyTCBQueueFront == (OS_TCB *)0) {
+    if (OSRdyTCBQueueFrontTbl[grp] == (OS_TCB *)0)
         return (OS_TCB *)0;
+
+    ptcb = OSRdyTCBQueueFrontTbl[grp];
+
+    if (OSRdyTCBQueueNumTbl[grp] == 1)
+    {
+        OSRdyTCBQueueFrontTbl[grp] = (OS_TCB *)0;
+        OSRdyTCBQueueRearTbl[grp] = (OS_TCB *)0;
+    }
+    else
+    {
+        OSRdyTCBQueueFrontTbl[grp] = ptcb->OSRdyTCBNext;
+        OSRdyTCBQueueFrontTbl[grp]->OSRdyTCBPrev = (OS_TCB *)0;
     }
 
-    /* 取出队头 */
-    ptcb = OSRdyTCBQueueFront;
-
-    if (OSRdyTCBQueueNum == 1) {
-        /* 只剩一个节点，队列变空 */
-        OSRdyTCBQueueFront = (OS_TCB *)0;
-        OSRdyTCBQueueRear  = (OS_TCB *)0;
-    } else {
-        /* 队头后移 */
-        OSRdyTCBQueueFront                 = ptcb->OSRdyTCBNext;
-        OSRdyTCBQueueFront->OSRdyTCBPrev   = (OS_TCB *)0;
-    }
-
-    /* 清空该节点的链表指针 */
     ptcb->OSRdyTCBNext = (OS_TCB *)0;
     ptcb->OSRdyTCBPrev = (OS_TCB *)0;
-    OSRdyTCBQueueNum--;
+    OSRdyTCBQueueNumTbl[grp]--;
 
     return ptcb;
 }
 
+
 void OS_InitRdyQueue(void)
 {
-    /* 队列为空：头尾指针都指向 NULL */
-    OSRdyTCBQueueFront = (OS_TCB *)0;
-    OSRdyTCBQueueRear  = (OS_TCB *)0;
-
-    /* 队列中没有任务 */
-    OSRdyTCBQueueNum   = 0;
+    OS_MemClr((INT8U *)&OSRdyTCBQueueFrontTbl[0], sizeof(OSRdyTCBQueueFrontTbl)); /* Clear all the TCBs                 */
+    OS_MemClr((INT8U *)&OSRdyTCBQueueRearTbl[0], sizeof(OSRdyTCBQueueRearTbl));   /* Clear the priority table           */
+    OS_MemClr((INT8U *)&OSRdyTCBQueueNumTbl[0], sizeof(OSRdyTCBQueueNumTbl));     /* Clear the priority table           */
 }
 
 #endif
@@ -1805,19 +1805,26 @@ static void OS_SchedNew(void)
     OSPrioHighRdy = (INT8U)((y << 3) + OSUnMapTbl[OSRdyTbl[y]]);
 #endif
 #if OS_SCHED_ROUND_ROBIN_EN > 0
-    if (OSTCBCur == 0 | OSTCBCur->quantum == 0)
+    if (OSTCBCur == 0)
     {
-        if (OSTCBCur != 0) {
-            OSRdyQueueOut();
+        INT8U y;
+
+        y = OSUnMapTbl[OSRdyGrp]; // y = 最高优先级组号
+        OSPrioHighRdy = (INT8U)((y << 3) + OSUnMapTbl[OSRdyTbl[y]]);
+    }
+    else if (OSTCBCur->quantum == 0)
+    {
+        INT8U y;
+        y = OSUnMapTbl[OSRdyGrp];
+
+        if (OSTCBCur->OSTCBPrio != OS_TASK_IDLE_PRIO)
+        {
+            OSRdyQueueOut(OSTCBCur->OSTCBY);
             OSRdyQueueIn(OSTCBCur);
+            OSPrioHighRdy = OSRdyTCBQueueFrontTbl[y]->OSTCBPrio;
         }
-        // your code:
-        if (OSRdyTCBQueueFront != (OS_TCB *) 0) {
-            OSPrioHighRdy = OSRdyTCBQueueFront->OSTCBPrio;
-        }
-        else {
-            INT8U y;
-            y = OSUnMapTbl[OSRdyGrp];
+        else
+        {
             OSPrioHighRdy = (INT8U)((y << 3) + OSUnMapTbl[OSRdyTbl[y]]);
         }
     }
