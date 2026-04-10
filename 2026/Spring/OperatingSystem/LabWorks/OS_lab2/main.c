@@ -28,7 +28,7 @@ int main(void)
 	OSTaskCreate(task2, (void *)0,
 		&task2_stk[TASK2_STK_SIZE - 1], TASK2_PRIO);
 	OSTaskCreate(task3, (void *)0,
-		&task2_stk[TASK3_STK_SIZE - 1], TASK3_PRIO);
+		&task3_stk[TASK3_STK_SIZE - 1], TASK3_PRIO);
 	ASM_Switch_To_Unprivileged();
 	OSStart();
 	return 0;
