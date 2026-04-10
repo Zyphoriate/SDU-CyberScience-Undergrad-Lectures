@@ -2179,6 +2179,7 @@ INT8U OS_TCBInit(INT8U prio, OS_STK *ptos, OS_STK *pbos, INT16U id, INT32U stk_s
 
 #if OS_SCHED_ROUND_ROBIN_EN > 0
 // your code:  put ptcb into queue of ready TCBs
+    OSRdyQueueIn(ptcb);
 #endif
 
         OSRdyGrp |= ptcb->OSTCBBitY; /* Make task ready to run                   */
