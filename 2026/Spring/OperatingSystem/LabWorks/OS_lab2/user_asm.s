@@ -4,12 +4,14 @@
 	IMPORT OSStartHighRdy_super
 	IMPORT OSTimeDly
 	IMPORT OSTaskCreate
+	IMPORT OSTaskDel
 		
 	EXPORT SVC_Handler
 	EXPORT syscall_print_str
 	EXPORT syscall_systick_init
 	EXPORT syscall_OSTimeDly
 	EXPORT syscall_OSTaskCreate
+	EXPORT syscall_OSTaskDel
 	EXPORT ASM_Switch_To_Unprivileged	
 	
 	AREA |.text|, CODE, READONLY, ALIGN=2
@@ -41,6 +43,8 @@ SVC_Handler
 	BEQ   OSTimeDly_call
 	CMP   R0, #0x05
 	BEQ   OSTaskCreate_call
+	CMP   R0, #0x06
+	BEQ   OSTaskDel_call
 	BX    LR
 print_str_call	
 	LDR   R0, [R2]
@@ -75,7 +79,15 @@ OSTaskCreate_call
 	BL    OSTaskCreate
 	POP   {LR}
 	BX    LR
-	
+
+OSTaskDel_call	
+	LDR   R0, [R2]
+	MOV   R1, #0xFFFF
+	AND   R0, R1
+	PUSH  {LR}
+	BL    OSTaskDel
+	POP   {LR}
+	BX    LR
 	
 ASM_Switch_To_Unprivileged	
 	MRS     R0, control
@@ -97,6 +109,10 @@ syscall_OSTimeDly
 	
 syscall_OSTaskCreate
 	SWI 0x05
+	BX  LR
+
+syscall_OSTaskDel
+	SWI 0x06
 	BX  LR
 	
 	END

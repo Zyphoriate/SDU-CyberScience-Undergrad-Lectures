@@ -510,6 +510,12 @@ INT8U  OSTaskDel (INT8U prio)
     ptcb->OSTCBTaskName[1] = OS_ASCII_NUL;
 #endif
     OS_EXIT_CRITICAL();
+
+#if OS_SCHED_ROUND_ROBIN_EN > 0
+    OSRdyQueueOut();
+    OSTCBCur = 0;
+#endif
+
     if (OSRunning == OS_TRUE) {
         OS_Sched();                                     /* Find new highest priority task              */
     }
