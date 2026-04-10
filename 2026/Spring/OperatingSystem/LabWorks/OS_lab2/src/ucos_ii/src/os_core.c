@@ -83,18 +83,66 @@ static void OS_SchedNew(void);
 */
 /******************FOR ROUND ROBIN***********************************************************************/
 #if OS_SCHED_ROUND_ROBIN_EN > 0
+
 void OSRdyQueueIn(OS_TCB *ptcb)
 {
-    // your codes
+    ptcb->quantum          = OS_SCHED_QUANTUM_MAX;
+    ptcb->OSRdyTCBNext     = (OS_TCB *)0;
+    ptcb->OSRdyTCBPrev     = (OS_TCB *)0;
+
+    if (OSRdyTCBQueueNum == 0) {
+        /* 队列为空，成为唯一节点 */
+        OSRdyTCBQueueFront = ptcb;
+        OSRdyTCBQueueRear  = ptcb;
+    } else {
+        /* 插入队尾 */
+        ptcb->OSRdyTCBPrev              = OSRdyTCBQueueRear;
+        OSRdyTCBQueueRear->OSRdyTCBNext = ptcb;
+        OSRdyTCBQueueRear               = ptcb;
+    }
+
+    OSRdyTCBQueueNum++;
 }
-OS_TCB *OSRdyQueueOut()
+
+OS_TCB *OSRdyQueueOut(void)
 {
-    // your codes
+    OS_TCB *ptcb;
+
+    if (OSRdyTCBQueueFront == (OS_TCB *)0) {
+        return (OS_TCB *)0;
+    }
+
+    /* 取出队头 */
+    ptcb = OSRdyTCBQueueFront;
+
+    if (OSRdyTCBQueueNum == 1) {
+        /* 只剩一个节点，队列变空 */
+        OSRdyTCBQueueFront = (OS_TCB *)0;
+        OSRdyTCBQueueRear  = (OS_TCB *)0;
+    } else {
+        /* 队头后移 */
+        OSRdyTCBQueueFront                 = ptcb->OSRdyTCBNext;
+        OSRdyTCBQueueFront->OSRdyTCBPrev   = (OS_TCB *)0;
+    }
+
+    /* 清空该节点的链表指针 */
+    ptcb->OSRdyTCBNext = (OS_TCB *)0;
+    ptcb->OSRdyTCBPrev = (OS_TCB *)0;
+    OSRdyTCBQueueNum--;
+
+    return ptcb;
 }
-void OS_InitRdyQueue()
+
+void OS_InitRdyQueue(void)
 {
-    // your codes
+    /* 队列为空：头尾指针都指向 NULL */
+    OSRdyTCBQueueFront = (OS_TCB *)0;
+    OSRdyTCBQueueRear  = (OS_TCB *)0;
+
+    /* 队列中没有任务 */
+    OSRdyTCBQueueNum   = 0;
 }
+
 #endif
 /*******************************************************************************************************/
 
@@ -1754,9 +1802,10 @@ static void OS_SchedNew(void)
     if (OSTCBCur == 0 | OSTCBCur->quantum == 0)
     {
         if (OSTCBCur != 0)
+            OSRdyQueueOut();
             OSRdyQueueIn(OSTCBCur);
         // your code:
-        // OSPrioHighRdy = ?;
+        OSPrioHighRdy = OSRdyTCBQueueFront->OSTCBPrio;
     }
 #endif
 #else /* We support up to 256 tasks                         */
