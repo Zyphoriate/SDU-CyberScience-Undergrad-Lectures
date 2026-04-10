@@ -86,6 +86,9 @@ static void OS_SchedNew(void);
 
 void OSRdyQueueIn(OS_TCB *ptcb)
 {
+    if (ptcb->OSTCBPrio == OS_TASK_IDLE_PRIO)
+        return;
+
     ptcb->quantum          = OS_SCHED_QUANTUM_MAX;
     ptcb->OSRdyTCBNext     = (OS_TCB *)0;
     ptcb->OSRdyTCBPrev     = (OS_TCB *)0;
@@ -1809,7 +1812,14 @@ static void OS_SchedNew(void)
             OSRdyQueueIn(OSTCBCur);
         }
         // your code:
-        OSPrioHighRdy = OSRdyTCBQueueFront->OSTCBPrio;
+        if (OSRdyTCBQueueFront != (OS_TCB *) 0) {
+            OSPrioHighRdy = OSRdyTCBQueueFront->OSTCBPrio;
+        }
+        else {
+            INT8U y;
+            y = OSUnMapTbl[OSRdyGrp];
+            OSPrioHighRdy = (INT8U)((y << 3) + OSUnMapTbl[OSRdyTbl[y]]);
+        }
     }
 #endif
 #else /* We support up to 256 tasks                         */
