@@ -1,0 +1,298 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[UTF8]{ctex}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\definecolor{codebg}{RGB}{248,248,248}
+\definecolor{codeframe}{RGB}{210,210,210}
+\lstdefinelanguage{diff}{
+    morecomment=[f][\color{blue!70!black}\bfseries]{@@},
+    morecomment=[f][\color{red!75!black}]{-},
+    morecomment=[f][\color{green!45!black}]{+}
+}
+\lstdefinestyle{diffstyle}{
+    language=diff,
+    backgroundcolor=\color{codebg},
+    frame=single,
+    rulecolor=\color{codeframe},
+    basicstyle=\ttfamily\footnotesize,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    numbersep=8pt,
+    tabsize=4,
+    breaklines=true,
+    showstringspaces=false,
+    captionpos=b
+}
+
+\begin{document}
+\section*{Diff Listings}
+
+\begin{lstlisting}[style=diffstyle,caption={main.c --- hunk -6 +6}]
+--- a/2026/Spring/OperatingSystem/LabWorks/OS_lab2/main.c
++++ b/2026/Spring/OperatingSystem/LabWorks/OS_lab2/main.c
+@@ -6,13 +6,16 @@
+ static OS_STK task1_stk[TASK1_STK_SIZE];
+ static OS_STK task2_stk[TASK1_STK_SIZE];
++static OS_STK task3_stk[TASK1_STK_SIZE];
+ void task1(void *p_arg);
+ void task2(void *p_arg);
++void task3(void *p_arg);
+ void ASM_Switch_To_Unprivileged(void);
+ void syscall_print_str(char *);
+ void syscall_OSTimeDly(uint32_t);
+ INT8U syscall_OSTaskCreate(void (*task)(void *p_arg), void *p_arg, O...
++INT8U  syscall_OSTaskDel (INT8U prio);
+ void systick_init(void);
+ void print_str(char *);
+\end{lstlisting}
+
+\begin{lstlisting}[style=diffstyle,caption={main.c --- hunk -24 +27}]
+--- a/2026/Spring/OperatingSystem/LabWorks/OS_lab2/main.c
++++ b/2026/Spring/OperatingSystem/LabWorks/OS_lab2/main.c
+@@ -24,29 +27,40 @@ int main(void)
+ 	OSTaskCreate(task2, (void *)0,
+ 		&task2_stk[TASK2_STK_SIZE - 1], TASK2_PRIO);
++	OSTaskCreate(task3, (void *)0,
++		&task3_stk[TASK3_STK_SIZE - 1], TASK3_PRIO);
+ 	ASM_Switch_To_Unprivileged();
+ 	OSStart();
+ }
+ static void task1(void *p_arg)
++{
++	for (int i = 1; i < 10; i++) {
++		syscall_print_str("Hello from Task 1!\n");
++	}
++
++	syscall_OSTaskDel(OS_PRIO_SELF);
++}
++
++static void task2(void *p_arg)
+ {
+ 	int i;
+ 		for (i = 1; i < 10; i++)
+ 			;
+-		syscall_print_str("Hello from Task 1!\n");
++		syscall_print_str("Hello from Task 2!\n");
+ 	}
+ }
+-static void task2(void *p_arg)
++static void task3(void *p_arg)
+ {
+ 	int i;
+ 		for (i = 1; i < 10; i++)
+ 			;
+-		syscall_print_str("Hello from Task 2!\n");
++		syscall_print_str("Hello from Task 3!\n");
+ 	}
+ }
+\end{lstlisting}
+
+\begin{lstlisting}[style=diffstyle,caption={os\_core.c --- hunk -83 +83}]
+--- 2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_core.c
++++ 2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_core.c
+@@ -83,18 +83,69 @@ static void OS_SchedNew(void);
+ #if OS_SCHED_ROUND_ROBIN_EN > 0
++
+ void OSRdyQueueIn(OS_TCB *ptcb)
+ {
+-	// your codes
++	if (ptcb->OSTCBPrio == OS_TASK_IDLE_PRIO)
++		return;
++
++	ptcb->quantum          = OS_SCHED_QUANTUM_MAX;
++	ptcb->OSRdyTCBNext     = (OS_TCB *)0;
++	ptcb->OSRdyTCBPrev     = (OS_TCB *)0;
++
++	if (OSRdyTCBQueueNum == 0) {
++		/* 队列为空，成为唯一节点 */
++		OSRdyTCBQueueFront = ptcb;
++		OSRdyTCBQueueRear  = ptcb;
++	} else {
++		/* 插入队尾 */
++		ptcb->OSRdyTCBPrev              = OSRdyTCBQueueRear;
++		OSRdyTCBQueueRear->OSRdyTCBNext = ptcb;
++		OSRdyTCBQueueRear               = ptcb;
++	}
++
++	OSRdyTCBQueueNum++;
+ }
+-OS_TCB *OSRdyQueueOut()
++
++OS_TCB *OSRdyQueueOut(void)
+ {
+-	// your codes
++	OS_TCB *ptcb;
++
++	if (OSRdyTCBQueueFront == (OS_TCB *)0) {
++		return (OS_TCB *)0;
++	}
++
++	/* 取出队头 */
++	ptcb = OSRdyTCBQueueFront;
++
++	if (OSRdyTCBQueueNum == 1) {
++		/* 只剩一个节点，队列变空 */
++		OSRdyTCBQueueFront = (OS_TCB *)0;
++		OSRdyTCBQueueRear  = (OS_TCB *)0;
++	} else {
++		/* 队头后移 */
++		OSRdyTCBQueueFront                 = ptcb->OSRdyTCBNext;
++		OSRdyTCBQueueFront->OSRdyTCBPrev   = (OS_TCB *)0;
++	}
++
++	/* 清空该节点的链表指针 */
++	ptcb->OSRdyTCBNext = (OS_TCB *)0;
++	ptcb->OSRdyTCBPrev = (OS_TCB *)0;
++	OSRdyTCBQueueNum--;
++
++	return ptcb;
+ }
+-void OS_InitRdyQueue()
++
++void OS_InitRdyQueue(void)
+ {
+-	// your codes
++	/* 队列为空：头尾指针都指向 NULL */
++	OSRdyTCBQueueFront = (OS_TCB *)0;
++	OSRdyTCBQueueRear  = (OS_TCB *)0;
++
++	/* 队列中没有任务 */
++	OSRdyTCBQueueNum   = 0;
+ }
++
+ #endif
+\end{lstlisting}
+
+\begin{lstlisting}[style=diffstyle,caption={os\_core.c --- hunk -961 +1012}]
+--- 2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_core.c
++++ 2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_core.c
+@@ -961,7 +1012,9 @@ void OSTimeTick(void)
+ #if OS_SCHED_ROUND_ROBIN_EN > 0
+-
++	if (OSTCBCur->quantum > 0) {
++		OSTCBCur->quantum--;
++	}
+ #endif
+\end{lstlisting}
+
+\begin{lstlisting}[style=diffstyle,caption={os\_core.c --- hunk -988 +1041}]
+--- 2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_core.c
++++ 2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_core.c
+@@ -988,6 +1041,7 @@ void OSTimeTick(void)
+ 	if ((OSRdyGrp & ptcb->OSTCBBitY) == 0 || (OSRdyTbl[ptcb->OSTCBY] &...
+ 	// your code: put ptcb into queue of ready tasks
++		OSRdyQueueIn(ptcb);
+ #endif
+\end{lstlisting}
+
+\begin{lstlisting}[style=diffstyle,caption={os\_core.c --- hunk -1753 +1807}]
+--- 2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_core.c
++++ 2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_core.c
+@@ -1753,10 +1807,19 @@ static void OS_SchedNew(void)
+ 	if (OSTCBCur == 0 | OSTCBCur->quantum == 0)
+ 	{
+-		if (OSTCBCur != 0)
++		if (OSTCBCur != 0) {
++			OSRdyQueueOut();
+ 			OSRdyQueueIn(OSTCBCur);
++		}
+ 		// your code:
+-		// OSPrioHighRdy = ?;
++		if (OSRdyTCBQueueFront != (OS_TCB *) 0) {
++			OSPrioHighRdy = OSRdyTCBQueueFront->OSTCBPrio;
++		}
++		else {
++			INT8U y;
++			y = OSUnMapTbl[OSRdyGrp];
++			OSPrioHighRdy = (INT8U)((y << 3) + OSUnMapTbl[OSRdyTbl[y]]);
++		}
+ 	}
+ #endif
+\end{lstlisting}
+
+\begin{lstlisting}[style=diffstyle,caption={os\_core.c --- hunk -2127 +2190}]
+--- 2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_core.c
++++ 2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_core.c
+@@ -2127,6 +2190,7 @@ INT8U OS_TCBInit(INT8U prio, OS_STK *ptos, OS_S...
+ #if OS_SCHED_ROUND_ROBIN_EN > 0
+ // your code:  put ptcb into queue of ready TCBs
++	OSRdyQueueIn(ptcb);
+ #endif
+\end{lstlisting}
+
+\begin{lstlisting}[style=diffstyle,caption={os\_task.c --- hunk -510 +510}]
+--- 2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_task.c
++++ 2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_task.c
+@@ -510,6 +510,12 @@ INT8U  OSTaskDel (INT8U prio)
+ #endif
+ 	OS_EXIT_CRITICAL();
++
++#if OS_SCHED_ROUND_ROBIN_EN > 0
++	OSRdyQueueOut();
++	OSTCBCur = 0;
++#endif
++
+ 	if (OSRunning == OS_TRUE) {
+ 		OS_Sched();
+\end{lstlisting}
+
+\begin{lstlisting}[style=diffstyle,caption={user\_asm.s --- hunk -4 +4}]
+--- a/2026/Spring/OperatingSystem/LabWorks/OS_lab2/user_asm.s
++++ b/2026/Spring/OperatingSystem/LabWorks/OS_lab2/user_asm.s
+@@ -4,12 +4,14 @@
+ IMPORT OSTimeDly
+ IMPORT OSTaskCreate
++IMPORT OSTaskDel
+ EXPORT SVC_Handler
+ EXPORT syscall_OSTimeDly
+ EXPORT syscall_OSTaskCreate
++EXPORT syscall_OSTaskDel
+ EXPORT ASM_Switch_To_Unprivileged
+\end{lstlisting}
+
+\begin{lstlisting}[style=diffstyle,caption={user\_asm.s --- hunk -41 +43}]
+--- a/2026/Spring/OperatingSystem/LabWorks/OS_lab2/user_asm.s
++++ b/2026/Spring/OperatingSystem/LabWorks/OS_lab2/user_asm.s
+@@ -41,6 +43,8 @@ SVC_Handler
+ 	CMP   R0, #0x05
+ 	BEQ   OSTaskCreate_call
++	CMP   R0, #0x06
++	BEQ   OSTaskDel_call
+ 	BX    LR
+ print_str_call
+\end{lstlisting}
+
+\begin{lstlisting}[style=diffstyle,caption={user\_asm.s --- hunk -75 +79}]
+--- a/2026/Spring/OperatingSystem/LabWorks/OS_lab2/user_asm.s
++++ b/2026/Spring/OperatingSystem/LabWorks/OS_lab2/user_asm.s
+@@ -75,7 +79,15 @@ OSTaskCreate_call
+ 	POP   {LR}
+ 	BX    LR
+-
++
++OSTaskDel_call
++	LDR   R0, [R2]
++	MOV   R1, #0xFFFF
++	AND   R0, R1
++	PUSH  {LR}
++	BL    OSTaskDel
++	POP   {LR}
++	BX    LR
+ ASM_Switch_To_Unprivileged
+\end{lstlisting}
+
+\begin{lstlisting}[style=diffstyle,caption={user\_asm.s --- hunk -98 +110}]
+--- a/2026/Spring/OperatingSystem/LabWorks/OS_lab2/user_asm.s
++++ b/2026/Spring/OperatingSystem/LabWorks/OS_lab2/user_asm.s
+@@ -98,5 +110,9 @@ syscall_OSTimeDly
+ 	SWI 0x05
+ 	BX  LR
++
++syscall_OSTaskDel
++	SWI 0x06
++	BX  LR
+ 	END
+\end{lstlisting}
+\end{document}

@@ -1,0 +1,267 @@
+diff --git a/2026/Spring/OperatingSystem/LabWorks/OS_lab2/main.c b/2026/Spring/OperatingSystem/LabWorks/OS_lab2/main.c
+index 7c1f3ce..0aaa276 100644
+--- a/2026/Spring/OperatingSystem/LabWorks/OS_lab2/main.c
++++ b/2026/Spring/OperatingSystem/LabWorks/OS_lab2/main.c
+@@ -7,9 +7,13 @@
+ static OS_STK task1_stk[TASK1_STK_SIZE];
+ static OS_STK task2_stk[TASK1_STK_SIZE];
+ static OS_STK task3_stk[TASK1_STK_SIZE];
++static OS_STK task4_stk[TASK1_STK_SIZE];
++static OS_STK task5_stk[TASK1_STK_SIZE];
+ void task1(void *p_arg);
+ void task2(void *p_arg);
+ void task3(void *p_arg);
++void task4(void *p_arg);
++void task5(void *p_arg);
+ void ASM_Switch_To_Unprivileged(void);
+ void syscall_print_str(char *);
+ void syscall_systick_init(void);
+@@ -28,14 +32,18 @@ int main(void)
+ 	OSTaskCreate(task2, (void *)0,
+ 		&task2_stk[TASK2_STK_SIZE - 1], TASK2_PRIO);
+ 	OSTaskCreate(task3, (void *)0,
+-		&task3_stk[TASK3_STK_SIZE - 1], TASK3_PRIO);
++		&task3_stk[TASK3_STK_SIZE - 1], 9);
++	OSTaskCreate(task4, (void *)0,
++		&task4_stk[TASK3_STK_SIZE - 1], 11);
++	OSTaskCreate(task5, (void *)0,
++		&task5_stk[TASK3_STK_SIZE - 1], 22);
+ 	ASM_Switch_To_Unprivileged();
+ 	OSStart();
+ 	return 0;
+ }
+ static void task1(void *p_arg)
+ {
+-	for (int i = 1; i < 10; i++) {
++	for (int i = 1; i < 1000; i++) {
+ 		syscall_print_str("Hello from Task 1!\n");
+ 	}
+ 
+@@ -43,24 +51,44 @@ static void task1(void *p_arg)
+ }
+ 
+ static void task2(void *p_arg)
++{
++	for (int i = 1; i < 1000; i++) {
++		syscall_print_str("Hello from Task 2!\n");
++	}
++
++	syscall_OSTaskDel(OS_PRIO_SELF);
++}
++
++static void task3(void *p_arg)
+ {
+ 	int i;
+ 	for (;;)
+ 	{
+ 		for (i = 1; i < 10; i++)
+ 			;
+-		syscall_print_str("Hello from Task 2!\n");
++		syscall_print_str("Hello from Task 3!\n");
+ 	}
+ }
+ 
+-static void task3(void *p_arg)
++static void task4(void *p_arg)
+ {
+ 	int i;
+ 	for (;;)
+ 	{
+ 		for (i = 1; i < 10; i++)
+ 			;
+-		syscall_print_str("Hello from Task 3!\n");
++		syscall_print_str("Hello from Task 4!\n");
++	}
++}
++
++static void task5(void *p_arg)
++{
++	int i;
++	for (;;)
++	{
++		for (i = 1; i < 10; i++)
++			;
++		syscall_print_str("Hello from Task 5!\n");
+ 	}
+ }
+ 
+diff --git a/2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_core.c b/2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_core.c
+index 2cd0c23..193ca8a 100644
+--- a/2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_core.c
++++ b/2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_core.c
+@@ -86,64 +86,64 @@ static void OS_SchedNew(void);
+ 
+ void OSRdyQueueIn(OS_TCB *ptcb)
+ {
++    INT8U grp;
++
+     if (ptcb->OSTCBPrio == OS_TASK_IDLE_PRIO)
+         return;
+ 
+-    ptcb->quantum          = OS_SCHED_QUANTUM_MAX;
+-    ptcb->OSRdyTCBNext     = (OS_TCB *)0;
+-    ptcb->OSRdyTCBPrev     = (OS_TCB *)0;
++    grp = ptcb->OSTCBY; // 优先级 >> 3，即第几组
+ 
+-    if (OSRdyTCBQueueNum == 0) {
+-        /* 队列为空，成为唯一节点 */
+-        OSRdyTCBQueueFront = ptcb;
+-        OSRdyTCBQueueRear  = ptcb;
+-    } else {
+-        /* 插入队尾 */
+-        ptcb->OSRdyTCBPrev              = OSRdyTCBQueueRear;
+-        OSRdyTCBQueueRear->OSRdyTCBNext = ptcb;
+-        OSRdyTCBQueueRear               = ptcb;
+-    }
++    ptcb->quantum = OS_SCHED_QUANTUM_MAX;
++    ptcb->OSRdyTCBNext = (OS_TCB *)0;
++    ptcb->OSRdyTCBPrev = (OS_TCB *)0;
+ 
+-    OSRdyTCBQueueNum++;
++    if (OSRdyTCBQueueNumTbl[grp] == 0)
++    {
++        OSRdyTCBQueueFrontTbl[grp] = ptcb;
++        OSRdyTCBQueueRearTbl[grp] = ptcb;
++    }
++    else
++    {
++        ptcb->OSRdyTCBPrev = OSRdyTCBQueueRearTbl[grp];
++        OSRdyTCBQueueRearTbl[grp]->OSRdyTCBNext = ptcb;
++        OSRdyTCBQueueRearTbl[grp] = ptcb;
++    }
++    OSRdyTCBQueueNumTbl[grp]++;
+ }
+ 
+-OS_TCB *OSRdyQueueOut(void)
++OS_TCB *OSRdyQueueOut(INT8U grp)
+ {
+     OS_TCB *ptcb;
+ 
+-    if (OSRdyTCBQueueFront == (OS_TCB *)0) {
++    if (OSRdyTCBQueueFrontTbl[grp] == (OS_TCB *)0)
+         return (OS_TCB *)0;
+-    }
+ 
+-    /* 取出队头 */
+-    ptcb = OSRdyTCBQueueFront;
++    ptcb = OSRdyTCBQueueFrontTbl[grp];
+ 
+-    if (OSRdyTCBQueueNum == 1) {
+-        /* 只剩一个节点，队列变空 */
+-        OSRdyTCBQueueFront = (OS_TCB *)0;
+-        OSRdyTCBQueueRear  = (OS_TCB *)0;
+-    } else {
+-        /* 队头后移 */
+-        OSRdyTCBQueueFront                 = ptcb->OSRdyTCBNext;
+-        OSRdyTCBQueueFront->OSRdyTCBPrev   = (OS_TCB *)0;
++    if (OSRdyTCBQueueNumTbl[grp] == 1)
++    {
++        OSRdyTCBQueueFrontTbl[grp] = (OS_TCB *)0;
++        OSRdyTCBQueueRearTbl[grp] = (OS_TCB *)0;
++    }
++    else
++    {
++        OSRdyTCBQueueFrontTbl[grp] = ptcb->OSRdyTCBNext;
++        OSRdyTCBQueueFrontTbl[grp]->OSRdyTCBPrev = (OS_TCB *)0;
+     }
+ 
+-    /* 清空该节点的链表指针 */
+     ptcb->OSRdyTCBNext = (OS_TCB *)0;
+     ptcb->OSRdyTCBPrev = (OS_TCB *)0;
+-    OSRdyTCBQueueNum--;
++    OSRdyTCBQueueNumTbl[grp]--;
+ 
+     return ptcb;
+ }
+ 
++
+ void OS_InitRdyQueue(void)
+ {
+-    /* 队列为空：头尾指针都指向 NULL */
+-    OSRdyTCBQueueFront = (OS_TCB *)0;
+-    OSRdyTCBQueueRear  = (OS_TCB *)0;
+-
+-    /* 队列中没有任务 */
+-    OSRdyTCBQueueNum   = 0;
++    OS_MemClr((INT8U *)&OSRdyTCBQueueFrontTbl[0], sizeof(OSRdyTCBQueueFrontTbl)); /* Clear all the TCBs                 */
++    OS_MemClr((INT8U *)&OSRdyTCBQueueRearTbl[0], sizeof(OSRdyTCBQueueRearTbl));   /* Clear the priority table           */
++    OS_MemClr((INT8U *)&OSRdyTCBQueueNumTbl[0], sizeof(OSRdyTCBQueueNumTbl));     /* Clear the priority table           */
+ }
+ 
+ #endif
+@@ -1805,19 +1805,26 @@ static void OS_SchedNew(void)
+     OSPrioHighRdy = (INT8U)((y << 3) + OSUnMapTbl[OSRdyTbl[y]]);
+ #endif
+ #if OS_SCHED_ROUND_ROBIN_EN > 0
+-    if (OSTCBCur == 0 | OSTCBCur->quantum == 0)
++    if (OSTCBCur == 0)
++    {
++        INT8U y;
++
++        y = OSUnMapTbl[OSRdyGrp]; // y = 最高优先级组号
++        OSPrioHighRdy = (INT8U)((y << 3) + OSUnMapTbl[OSRdyTbl[y]]);
++    }
++    else if (OSTCBCur->quantum == 0)
+     {
+-        if (OSTCBCur != 0) {
+-            OSRdyQueueOut();
++        INT8U y;
++        y = OSUnMapTbl[OSRdyGrp];
++
++        if (OSTCBCur->OSTCBPrio != OS_TASK_IDLE_PRIO)
++        {
++            OSRdyQueueOut(OSTCBCur->OSTCBY);
+             OSRdyQueueIn(OSTCBCur);
++            OSPrioHighRdy = OSRdyTCBQueueFrontTbl[y]->OSTCBPrio;
+         }
+-        // your code:
+-        if (OSRdyTCBQueueFront != (OS_TCB *) 0) {
+-            OSPrioHighRdy = OSRdyTCBQueueFront->OSTCBPrio;
+-        }
+-        else {
+-            INT8U y;
+-            y = OSUnMapTbl[OSRdyGrp];
++        else
++        {
+             OSPrioHighRdy = (INT8U)((y << 3) + OSUnMapTbl[OSRdyTbl[y]]);
+         }
+     }
+diff --git a/2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_task.c b/2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_task.c
+index 84256c1..01355bc 100644
+--- a/2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_task.c
++++ b/2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/os_task.c
+@@ -512,7 +512,7 @@ INT8U  OSTaskDel (INT8U prio)
+     OS_EXIT_CRITICAL();
+ 
+ #if OS_SCHED_ROUND_ROBIN_EN > 0
+-    OSRdyQueueOut();
++    OSRdyQueueOut(ptcb->OSTCBY);
+     OSTCBCur = 0;
+ #endif
+ 
+diff --git a/2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/ucos_ii.h b/2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/ucos_ii.h
+index 2f9419b..c283666 100644
+--- a/2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/ucos_ii.h
++++ b/2026/Spring/OperatingSystem/LabWorks/OS_lab2/src/ucos_ii/src/ucos_ii.h
+@@ -13,7 +13,7 @@
+ * LICENSING TERMS:
+ * ---------------
+ *   uC/OS-II is provided in source form for FREE evaluation, for educational use or for peaceful research.
+-* If you plan on using  uC/OS-II  in a commercial product you need to contact Micri�m to properly license
++* If you plan on using  uC/OS-II  in a commercial product you need to contact Micri�m to properly license
+ * its use in your product. We provide ALL the source code for your convenience and to help you experience
+ * uC/OS-II.   The fact that the  source is provided does  NOT  mean that you can use it without  paying a
+ * licensing fee.
+@@ -766,9 +766,9 @@ OS_EXT  OS_TCB            OSTCBTbl[OS_MAX_TASKS + OS_N_SYS_TASKS];   /* Table of
+ 
+ /************************FOR ROUND ROBIN*********************************************/
+ #if OS_SCHED_ROUND_ROBIN_EN > 0
+-OS_EXT  OS_TCB           *OSRdyTCBQueueFront;
+-OS_EXT  OS_TCB           *OSRdyTCBQueueRear;
+-OS_EXT  INT8U             OSRdyTCBQueueNum;
++OS_EXT  OS_TCB           *OSRdyTCBQueueFrontTbl[8];
++OS_EXT  OS_TCB           *OSRdyTCBQueueRearTbl[8];
++OS_EXT  INT8U             OSRdyTCBQueueNumTbl[8];
+ #endif
+ /**************************************************************************************/
+ 
