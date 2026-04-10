@@ -1,0 +1,227 @@
+\documentclass[UTF8]{ctexart}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{amsmath}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\small,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single
+}
+
+\lstset{style=mystyle}
+
+\title{山东大学操作系统实验报告}
+\author{姓名：张宇杰 \quad 学号：202400460175}
+\date{2026年3月18日}
+
+\begin{document}
+
+\maketitle
+
+\section{实验一：ARM Cortex-M3 特权模式与系统调用}
+
+\subsection{实验目的}
+\begin{itemize}
+    \item 理解 ARM Cortex-M3 的特权级（Privileged）与非特权级（Unprivileged）模式。
+    \item 掌握 SVC（Supervisor Call）指令触发系统调用的机制。
+    \item 学习如何在 $\mu$C/OS-II 嵌入式操作系统中实现用户态任务。
+    \item 掌握异常处理程序中堆栈帧的结构及参数提取方法。
+\end{itemize}
+
+\subsection{实验环境}
+\begin{itemize}
+    \item 开发工具：Keil uVision
+    \item 硬件平台：STM32F103 (Cortex-M3)
+    \item 操作系统：$\mu$C/OS-II v2.86
+\end{itemize}
+
+\subsection{实验原理}
+ARM Cortex-M3 在线程模式下分为特权级和非特权级。用户任务运行在非特权级时，无法直接操作核心外设（如 SysTick 等）。若需执行受限操作，必须通过 \texttt{SVC} 指令触发异常，切换至处理模式由内核代为执行。
+
+触发异常时，硬件会自动将 \texttt{R0-R3, R12, LR, PC, xPSR} 压入当前使用栈中以保存现场。异常处理程序根据栈帧中保存的 PC 寄存器向后回溯，读取触发位置的 \texttt{svc \#imm8} 立即数，将其用作系统调用编号作进一步的分发和响应。该机制提供了从用户级请求内核服务的安全途径。
+
+\section{任务一：实现系统调用}
+
+\subsection{设计思路}
+任务要求在非特权模式下，使用户任务能调用时钟初始化和串口打印功能。直接调用外设函数会因为权限不足抛出 HardFault 异常。为解决此问题，需将这两项功能封装为系统调用：
+\begin{itemize}
+    \item \textbf{用户态发起}：应用程序内嵌汇编指令，打印和时钟初始化分别触发 \texttt{svc \#0x01} 和 \texttt{svc \#0x02}；
+    \item \textbf{陷入异常层取号}：\texttt{SVC\_Handler} 读取并解析当前栈内保存的调用编号；
+    \item \textbf{统一分发执行}：\texttt{SVC\_Handler\_Main()} 作为 C 函数总入口，根据调用号执行相应的外设操作逻辑。
+\end{itemize}
+
+\subsection{代码修改}
+\begin{lstlisting}[language=C, caption=SVC\_Handler\_Main 中任务一调用分发]
+void SVC_Handler_Main(int flag)
+{
+    switch (flag)
+    {
+        case 0x01:
+        {
+            print_str(buffer);
+            break;
+        }
+        case 0x02:
+        {
+            RCC_ClocksTypeDef rcc_clocks;
+            RCC_GetClocksFreq(&rcc_clocks);
+            SysTick_Config(rcc_clocks.HCLK_Frequency / OS_TICKS_PER_SEC);
+            break;
+        }
+        default:
+            break;
+    }
+}
+\end{lstlisting}
+
+\subsection{结果验证}
+在 Keil 调试环境中，使用非特权模式运行程序。终端成功接收到了字符输出，SysTick 定时器也正常触发配置完成的节拍。任务一搭建的 syscall 通道验证通过。
+
+\section{任务二：修改OS源码使任务运行在非特权模式}
+
+\subsection{修改思路}
+如果直接切入非特权运行 $\mu$C/OS-II，部分内核调度代码会立刻宕机发生 HardFault。经跟踪调用栈定位到两个必须依赖特权才可运行的核心原语：
+\begin{itemize}
+    \item \texttt{OSStartHighRdy()}：系统脱离初始化并初次加载最高优先级任务的入口。
+    \item \texttt{OS\_TASK\_SW()}：运行期的多任务上下文切换入口。
+\end{itemize}
+
+这两处包含修改处理器核心调度状态的底层指令。解决思路与任务一一致：对原有调用逻辑进行封装替换。保持原有调度状态判定和 TCB 修改的完整逻辑机制，仅将其底层的强制调用部分变更为系统调用指令 \texttt{svc \#0x03} \ 与 \ \texttt{svc \#0x04}，在内核代理层接手继续触发调度。
+
+同时，通过注释 SysTick 内的中断调试打印，避免持续发信对任务观察视线造成干扰。
+
+\subsection{代码修改}
+\begin{lstlisting}[language=C, caption=SVC\_Handler\_Main 中任务二调用分发]
+case 0x03:
+{
+    OSStartHighRdy();
+    break;
+}
+case 0x04:
+{
+    OS_TASK_SW();
+    break;
+}
+\end{lstlisting}
+
+\begin{lstlisting}[language=C, caption=os\_core.c 中 OSStart 的修改]
+void OSStart(void)
+{
+    if (OSRunning == OS_FALSE) {
+        OS_SchedNew();
+        OSPrioCur    = OSPrioHighRdy;
+        OSTCBHighRdy = OSTCBPrioTbl[OSPrioHighRdy];
+        OSTCBCur     = OSTCBHighRdy;
+        __asm volatile ("svc #3");
+    }
+}
+\end{lstlisting}
+
+\begin{lstlisting}[language=C, caption=os\_time.c 中 OS\_Sched 的修改]
+void OS_Sched(void)
+{
+#if OS_CRITICAL_METHOD == 3
+    OS_CPU_SR cpu_sr = 0;
+#endif
+
+    OS_ENTER_CRITICAL();
+    if (OSIntNesting == 0) {
+        if (OSLockNesting == 0) {
+            OS_SchedNew();
+            if (OSPrioHighRdy != OSPrioCur) {
+                OSTCBHighRdy = OSTCBPrioTbl[OSPrioHighRdy];
+#if OS_TASK_PROFILE_EN > 0
+                OSTCBHighRdy->OSTCBCtxSwCtr++;
+#endif
+                OSCtxSwCtr++;
+                __asm volatile ("svc #4");
+            }
+        }
+    }
+    OS_EXIT_CRITICAL();
+}
+\end{lstlisting}
+
+\subsection{结果验证}
+通过 \texttt{OSTaskCreate()} 开设两个并发测试任务。监控证明系统再未触发 HardFault，两个任务可以在无特权加持的环境中实现自主、流畅的轮转输出交互。
+
+\section{任务三（选做）：无缓冲区打印}
+
+\subsection{设计思路}
+任务一依赖全局数组 \texttt{buffer} 做内容缓冲过渡后再调用内核层打满，此做法造成了冗余的字符串复制损耗和内存开销。本任务的优化目标在于实现零拷贝参数传递。
+
+按照 ARM 体系的调用规约 (AAPCS)，软中断发起时输入参数已存在于 \texttt{R0} 寄存器。更重要的是，在响应 SVC 时，硬件会自动将 \texttt{R0} 等核心寄存器直接压入相应的返回活动栈 (MSP 或 PSP) 内。
+因此，抛弃全局缓冲即可简化为：进入异常后定位当前启用的栈起址，通过偏移值找到位于栈帧中的原 \texttt{R0} 数据即可读出源字符串地址进而原样输出。
+
+\subsection{代码修改}
+\begin{lstlisting}[caption=SVC\_Handler 传递栈指针与调用号]
+SVC_Handler
+    TST   LR, #4
+    MRSEQ R1, MSP
+    MRSNE R1, PSP
+
+    ; R1 保存异常栈地址
+    LDR   R0, [R1, #24]    ; 取异常返回PC
+    SUB   R0, #2           ; 回到 SVC 指令地址
+    LDRB  R0, [R0]         ; 取 imm8 作为调用号
+
+    B     SVC_Handler_Main
+\end{lstlisting}
+
+\begin{lstlisting}[language=C, caption=无缓冲区打印实现]
+void SVC_Handler_Main(int flag, void *stack)
+{
+    switch (flag)
+    {
+        case 0x05:
+        {
+            char *str = (char *)(*((uint32_t *)stack));
+            print_str(str);
+            break;
+        }
+        default:
+            break;
+    }
+}
+\end{lstlisting}
+
+\subsection{实现细节}
+\begin{itemize}
+    \item \textbf{活动栈判别：}进入中断后状态可能处于 MSP 或 PSP 上下文。我们利用检查 \texttt{LR} 寄存器的次低位（\texttt{TST LR, \#4}）来精准分流。
+    \item \textbf{硬件机制化用：}省去 \texttt{memcpy} 以及额外预留内存，利用硬件的天然异常栈特征高效充当传参管道。
+\end{itemize}
+
+\subsection{结果验证}
+通过调用预留号 \texttt{0x05}，重定位原变量后直接转给打字输出。内容展示正常且未引发系统抖动或内存泄漏，无缓存式指令接口运转顺畅。
+
+\section{实验总结}
+本次实验充分探索了基于 Cortex-M3 核心特权与非特权边界构建操作系统的机制。主要收获包括：
+\begin{enumerate}
+    \item 根据软指令和体系架构特性熟练掌握了一套实现用户态向核心态隔离的安全接口（系统调用）规范。
+    \item 针对成型的经典 RTOS 代码实施无损向后移植，对分析调试调用栈进而追查异常起源的方法有了深层次利用经验。
+    \item 借助硬堆栈自动备份参数的特性剥离冗余的传输机制，增强了自身在底层资源利用上的理解和效率优化意识。
+\end{enumerate}
+实验验证了从用户程序发起到特权拦截代理的高效闭环，锻炼了我在底端微处理器架构下的综合系统架构能力。
+\end{document}
